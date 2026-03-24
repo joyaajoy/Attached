@@ -1,15 +1,20 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: API specification for Russian Electric Trains (Elektrichki)
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: stations
+    description: Train stations
+  - name: schedule
+    description: Train schedules
+  - name: tickets
+    description: User tickets
 paths:
   /healthz:
     get:
@@ -24,6 +29,117 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /stations/search:
+    get:
+      operationId: searchStations
+      tags: [stations]
+      summary: Search stations
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of stations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StationsResponse"
+
+  /stations/popular:
+    get:
+      operationId: getPopularStations
+      tags: [stations]
+      summary: Get popular stations
+      responses:
+        "200":
+          description: Popular stations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StationsResponse"
+
+  /schedule:
+    get:
+      operationId: getSchedule
+      tags: [schedule]
+      summary: Get train schedule between two stations
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Yandex station code (from)
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Yandex station code (to)
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Date in YYYY-MM-DD format (defaults to today)
+      responses:
+        "200":
+          description: Schedule data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleResponse"
+
+  /tickets:
+    get:
+      operationId: getTickets
+      tags: [tickets]
+      summary: Get user saved tickets
+      responses:
+        "200":
+          description: Saved tickets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketsResponse"
+
+    post:
+      operationId: saveTicket
+      tags: [tickets]
+      summary: Save a ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveTicketRequest"
+      responses:
+        "201":
+          description: Ticket saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+
+  /tickets/{id}:
+    delete:
+      operationId: deleteTicket
+      tags: [tickets]
+      summary: Delete a ticket
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Ticket deleted
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +150,152 @@ components:
       required:
         - status
 
+    Station:
+      type: object
+      properties:
+        code:
+          type: string
+        title:
+          type: string
+        popular_title:
+          type: string
+        short_title:
+          type: string
+        lat:
+          type: number
+          nullable: true
+        lng:
+          type: number
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        direction:
+          type: string
+          nullable: true
+      required:
+        - code
+        - title
+
+    StationsResponse:
+      type: object
+      properties:
+        stations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Station"
+      required:
+        - stations
+
+    TrainSegment:
+      type: object
+      properties:
+        uid:
+          type: string
+        number:
+          type: string
+        title:
+          type: string
+        departure:
+          type: string
+        arrival:
+          type: string
+        duration:
+          type: number
+        from_station:
+          $ref: "#/components/schemas/Station"
+        to_station:
+          $ref: "#/components/schemas/Station"
+        stops:
+          type: string
+          nullable: true
+        price_min:
+          type: number
+          nullable: true
+        price_max:
+          type: number
+          nullable: true
+        ticket_type:
+          type: string
+          nullable: true
+        transport_subtype:
+          type: string
+          nullable: true
+        thread_express_type:
+          type: string
+          nullable: true
+      required:
+        - uid
+        - number
+        - title
+        - departure
+        - arrival
+        - duration
+        - from_station
+        - to_station
+
+    ScheduleResponse:
+      type: object
+      properties:
+        date:
+          type: string
+        from:
+          $ref: "#/components/schemas/Station"
+        to:
+          $ref: "#/components/schemas/Station"
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrainSegment"
+        interval_segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrainSegment"
+      required:
+        - date
+        - from
+        - to
+        - segments
+        - interval_segments
+
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+        segment:
+          $ref: "#/components/schemas/TrainSegment"
+        date:
+          type: string
+        saved_at:
+          type: string
+        status:
+          type: string
+          enum: [active, used, cancelled]
+      required:
+        - id
+        - segment
+        - date
+        - saved_at
+        - status
+
+    TicketsResponse:
+      type: object
+      properties:
+        tickets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ticket"
+      required:
+        - tickets
+
+    SaveTicketRequest:
+      type: object
+      properties:
+        segment:
+          $ref: "#/components/schemas/TrainSegment"
+        date:
+          type: string
+      required:
+        - segment
+        - date

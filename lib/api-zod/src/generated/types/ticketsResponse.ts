@@ -5,7 +5,8 @@
  * API specification for Russian Electric Trains (Elektrichki)
  * OpenAPI spec version: 0.1.0
  */
+import type { Ticket } from "./ticket";
 
-export interface HealthStatus {
-  status: string;
+export interface TicketsResponse {
+  tickets: Ticket[];
 }
