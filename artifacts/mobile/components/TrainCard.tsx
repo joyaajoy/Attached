@@ -120,14 +120,14 @@ export function TrainCard({ segment, onPress, onSave, isSaved }: Props) {
           <Ionicons name="pricetag-outline" size={13} color={C.textMuted} />
           <Text style={[styles.price, { color: C.tint }]}>{price}</Text>
         </View>
-        {segment.stops ? (
-          <View style={styles.footerRight}>
-            <Ionicons name="location-outline" size={13} color={C.textMuted} />
-            <Text style={[styles.stops, { color: C.textSecondary }]} numberOfLines={1}>
-              {segment.stops}
-            </Text>
-          </View>
-        ) : null}
+        <View style={{ flex: 1 }} />
+        <Pressable
+          style={[styles.buyBtn, { backgroundColor: C.tint }]}
+          onPress={handlePress}
+          hitSlop={4}
+        >
+          <Text style={styles.buyBtnText}>Купить</Text>
+        </Pressable>
       </View>
     </AnimatedPressable>
   );
@@ -240,5 +240,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_400Regular",
     flex: 1,
+  },
+  buyBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  buyBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
   },
 });

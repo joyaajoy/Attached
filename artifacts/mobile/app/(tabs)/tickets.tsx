@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -8,15 +8,20 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Modal,
+  Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { FadeInDown, FadeOut, Layout } from "react-native-reanimated";
+import Animated, { FadeInDown, FadeOut, Layout, useSharedValue, useAnimatedStyle, withSpring } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
+import QRCode from "react-native-qrcode-svg";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useTickets } from "@/hooks/useTickets";
 import type { Ticket } from "@workspace/api-client-react";
+
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
 function formatTime(iso: string): string {
   try {
@@ -41,10 +46,50 @@ function formatDuration(sec: number): string {
   return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
 }
 
+function buildQrData(ticket: Ticket): string {
+  const seg = ticket.segment;
+  return [
+    `ID:${ticket.id}`,
+    `FROM:${seg.from_station.title}`,
+    `TO:${seg.to_station.title}`,
+    `DEP:${seg.departure}`,
+    `ARR:${seg.arrival}`,
+    `TRAIN:${seg.number}`,
+    `DATE:${ticket.date}`,
+  ].join("|");
+}
+
+function QrFullscreenModal({ data, onClose }: { data: string; onClose: () => void }) {
+  const { C } = useTheme();
+  const insets = useSafeAreaInsets();
+  const size = Math.min(SCREEN_W, SCREEN_H) - 80;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <View style={[styles.modalBox, { backgroundColor: C.surface, paddingBottom: insets.bottom + 24 }]}>
+          <Pressable onPress={onClose} style={[styles.modalCloseBtn, { top: 16 + insets.top }]}>
+            <Ionicons name="close" size={22} color={C.text} />
+          </Pressable>
+          <Text style={[styles.modalTitle, { color: C.text }]}>QR-код билета</Text>
+          <Text style={[styles.modalSub, { color: C.textMuted }]}>Предъявите при проверке</Text>
+          <View style={[styles.qrWrapper, { backgroundColor: "#fff", borderColor: C.border }]}>
+            <QRCode value={data} size={size - 64} backgroundColor="#fff" color="#000" />
+          </View>
+          <Text style={[styles.tapHint, { color: C.textMuted }]}>Нажмите в любом месте, чтобы закрыть</Text>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function TicketItem({ ticket, onDelete }: { ticket: Ticket; onDelete: (id: string) => void }) {
   const { C } = useTheme();
+  const [expanded, setExpanded] = useState(false);
+  const [qrFullscreen, setQrFullscreen] = useState(false);
   const seg = ticket.segment;
   const isPast = new Date(ticket.date) < new Date(new Date().toDateString());
+  const qrData = buildQrData(ticket);
 
   const handleDelete = () => {
     if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -54,69 +99,111 @@ function TicketItem({ ticket, onDelete }: { ticket: Ticket; onDelete: (id: strin
     ]);
   };
 
+  const handleToggle = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setExpanded((v) => !v);
+  };
+
+  const handleQrPress = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setQrFullscreen(true);
+  };
+
   return (
-    <Animated.View
-      entering={FadeInDown.springify()}
-      exiting={FadeOut}
-      layout={Layout.springify()}
-    >
-      <View style={[styles.ticketCard, { backgroundColor: C.surface, borderColor: C.border, opacity: isPast ? 0.6 : 1 }]}>
-        <View style={[styles.ticketStrip, { backgroundColor: isPast ? C.textMuted : C.tint }]} />
+    <>
+      <Animated.View
+        entering={FadeInDown.springify()}
+        exiting={FadeOut}
+        layout={Layout.springify()}
+      >
+        <Pressable
+          style={[styles.ticketCard, { backgroundColor: C.surface, borderColor: C.border, opacity: isPast ? 0.65 : 1 }]}
+          onPress={handleToggle}
+          android_ripple={{ color: C.border }}
+        >
+          <View style={[styles.ticketStrip, { backgroundColor: isPast ? C.textMuted : C.tint }]} />
 
-        <View style={styles.ticketBody}>
-          <View style={styles.ticketHeader}>
-            <View style={[styles.statusBadge, { backgroundColor: isPast ? C.surfaceSecondary : C.tint + "18" }]}>
+          <View style={styles.ticketBody}>
+            <View style={styles.ticketHeader}>
+              <View style={[styles.statusBadge, { backgroundColor: isPast ? C.surfaceSecondary : C.tint + "18" }]}>
+                <Ionicons
+                  name={isPast ? "checkmark-circle" : "radio-button-on"}
+                  size={12}
+                  color={isPast ? C.textMuted : C.tint}
+                />
+                <Text style={[styles.statusText, { color: isPast ? C.textMuted : C.tint }]}>
+                  {isPast ? "Использован" : "Активен"}
+                </Text>
+              </View>
+              <Text style={[styles.dateText, { color: C.textMuted }]}>{formatDate(ticket.date)}</Text>
               <Ionicons
-                name={isPast ? "checkmark-circle" : "radio-button-on"}
-                size={12}
-                color={isPast ? C.textMuted : C.tint}
+                name={expanded ? "chevron-up" : "chevron-down"}
+                size={16}
+                color={C.textMuted}
+                style={{ marginLeft: 4 }}
               />
-              <Text style={[styles.statusText, { color: isPast ? C.textMuted : C.tint }]}>
-                {isPast ? "Использован" : "Активен"}
-              </Text>
-            </View>
-            <Text style={[styles.dateText, { color: C.textMuted }]}>{formatDate(ticket.date)}</Text>
-          </View>
-
-          <View style={styles.routeRow}>
-            <View style={styles.timeBlock}>
-              <Text style={[styles.time, { color: C.text }]}>{formatTime(seg.departure)}</Text>
-              <Text style={[styles.stationName, { color: C.textSecondary }]} numberOfLines={1}>
-                {seg.from_station.short_title || seg.from_station.title}
-              </Text>
             </View>
 
-            <View style={styles.durationBlock}>
-              <Text style={[styles.duration, { color: C.textMuted }]}>{formatDuration(seg.duration)}</Text>
-              <View style={styles.durationLine}>
-                <View style={[styles.dot, { backgroundColor: C.tint }]} />
-                <View style={[styles.line, { backgroundColor: C.border }]} />
-                <Ionicons name="train-outline" size={12} color={C.tint} />
-                <View style={[styles.line, { backgroundColor: C.border }]} />
-                <View style={[styles.dot, { backgroundColor: C.tint }]} />
+            <View style={styles.routeRow}>
+              <View style={styles.timeBlock}>
+                <Text style={[styles.time, { color: C.text }]}>{formatTime(seg.departure)}</Text>
+                <Text style={[styles.stationName, { color: C.textSecondary }]} numberOfLines={1}>
+                  {seg.from_station.short_title || seg.from_station.title}
+                </Text>
+              </View>
+
+              <View style={styles.durationBlock}>
+                <Text style={[styles.duration, { color: C.textMuted }]}>{formatDuration(seg.duration)}</Text>
+                <View style={styles.durationLine}>
+                  <View style={[styles.dot, { backgroundColor: C.tint }]} />
+                  <View style={[styles.line, { backgroundColor: C.border }]} />
+                  <Ionicons name="train-outline" size={12} color={C.tint} />
+                  <View style={[styles.line, { backgroundColor: C.border }]} />
+                  <View style={[styles.dot, { backgroundColor: C.tint }]} />
+                </View>
+              </View>
+
+              <View style={[styles.timeBlock, { alignItems: "flex-end" }]}>
+                <Text style={[styles.time, { color: C.text }]}>{formatTime(seg.arrival)}</Text>
+                <Text style={[styles.stationName, { color: C.textSecondary }]} numberOfLines={1}>
+                  {seg.to_station.short_title || seg.to_station.title}
+                </Text>
               </View>
             </View>
 
-            <View style={[styles.timeBlock, { alignItems: "flex-end" }]}>
-              <Text style={[styles.time, { color: C.text }]}>{formatTime(seg.arrival)}</Text>
-              <Text style={[styles.stationName, { color: C.textSecondary }]} numberOfLines={1}>
-                {seg.to_station.short_title || seg.to_station.title}
-              </Text>
+            <View style={[styles.ticketFooter, { borderTopColor: C.border }]}>
+              <Text style={[styles.trainNum, { color: C.textMuted }]}>№{seg.number} · {seg.title}</Text>
+              {seg.price_min ? (
+                <Text style={[styles.price, { color: C.tint }]}>{seg.price_min} ₽</Text>
+              ) : null}
+              <Pressable onPress={handleDelete} hitSlop={8}>
+                <Ionicons name="trash-outline" size={18} color={C.red} />
+              </Pressable>
             </View>
-          </View>
 
-          <View style={[styles.ticketFooter, { borderTopColor: C.border }]}>
-            <Text style={[styles.trainNum, { color: C.textMuted }]}>№{seg.number} · {seg.title}</Text>
-            {seg.price_min ? (
-              <Text style={[styles.price, { color: C.tint }]}>{seg.price_min} ₽</Text>
-            ) : null}
-            <Pressable onPress={handleDelete} hitSlop={8}>
-              <Ionicons name="trash-outline" size={18} color={C.red} />
-            </Pressable>
+            {expanded && (
+              <Animated.View
+                entering={FadeInDown.duration(200)}
+                style={[styles.qrSection, { borderTopColor: C.border }]}
+              >
+                <Text style={[styles.qrLabel, { color: C.textSecondary }]}>QR-код для прохода</Text>
+                <Pressable onPress={handleQrPress} style={[styles.qrContainer, { backgroundColor: "#fff", borderColor: C.border }]}>
+                  <QRCode value={qrData} size={160} backgroundColor="#fff" color="#000" />
+                  <View style={[styles.qrTapHint, { backgroundColor: C.tint + "22" }]}>
+                    <Ionicons name="expand-outline" size={13} color={C.tint} />
+                    <Text style={[styles.qrTapText, { color: C.tint }]}>Нажмите для увеличения</Text>
+                  </View>
+                </Pressable>
+              </Animated.View>
+            )}
           </View>
-        </View>
-      </View>
-    </Animated.View>
+        </Pressable>
+      </Animated.View>
+
+      {qrFullscreen && (
+        <QrFullscreenModal data={qrData} onClose={() => setQrFullscreen(false)} />
+      )}
+    </>
   );
 }
 
@@ -263,6 +350,9 @@ const styles = StyleSheet.create({
   dateText: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
+    flex: 1,
+    textAlign: "right",
+    marginRight: 4,
   },
   routeRow: {
     flexDirection: "row",
@@ -322,5 +412,81 @@ const styles = StyleSheet.create({
   price: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
+  },
+  qrSection: {
+    borderTopWidth: 1,
+    marginTop: 12,
+    paddingTop: 14,
+    alignItems: "center",
+    gap: 10,
+  },
+  qrLabel: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  qrContainer: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    gap: 10,
+  },
+  qrTapHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  qrTapText: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.85)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalBox: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+  },
+  modalCloseBtn: {
+    position: "absolute",
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    marginBottom: 2,
+  },
+  modalSub: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    marginBottom: 16,
+  },
+  qrWrapper: {
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  tapHint: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    marginTop: 16,
   },
 });
