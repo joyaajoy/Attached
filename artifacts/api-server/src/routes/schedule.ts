@@ -128,4 +128,43 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.get("/thread", async (req, res) => {
+  const uid = req.query.uid as string;
+  const date = (req.query.date as string) || formatDate(new Date());
+
+  if (!uid) {
+    res.status(400).json({ error: "uid is required" });
+    return;
+  }
+
+  try {
+    const url = `${RASP_BASE}/thread/?apikey=${YANDEX_RASP_API_KEY}&uid=${encodeURIComponent(uid)}&date=${date}&format=json&lang=ru_RU&show_systems=yandex`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      res.status(502).json({ stops: [] });
+      return;
+    }
+
+    const data = await response.json() as any;
+    const stops = (data?.stops || []).map((s: any) => ({
+      station: {
+        title: s?.station?.title || "",
+        short_title: s?.station?.short_title || "",
+        popular_title: s?.station?.popular_title || "",
+        code: s?.station?.codes?.yandex_code || s?.station?.code || "",
+      },
+      arrival: s?.arrival || null,
+      departure: s?.departure || null,
+      duration: s?.duration || null,
+      stop_time: s?.stop_time || null,
+    }));
+
+    res.json({ stops, uid, date });
+  } catch (err) {
+    req.log.error({ err }, "Error fetching thread");
+    res.status(500).json({ stops: [] });
+  }
+});
+
 export default router;

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Pressable,
   Platform,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,11 +18,17 @@ import { useTheme } from "@/hooks/useTheme";
 import { useTickets } from "@/hooks/useTickets";
 import type { TrainSegment } from "@workspace/api-client-react";
 
-function formatTime(iso: string): string {
+const BASE_URL = process.env.EXPO_PUBLIC_DOMAIN
+  ? `https://${process.env.EXPO_PUBLIC_DOMAIN}`
+  : "http://localhost:3001";
+
+function formatTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
   try {
+    if (iso.length <= 8) return iso.slice(0, 5);
     return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
   } catch {
-    return iso.slice(11, 16);
+    return iso.slice(0, 5);
   }
 }
 
@@ -39,20 +46,13 @@ function formatDate(dateStr: string): string {
   }
 }
 
-function InfoRow({ icon, label, value, color }: { icon: string; label: string; value: string; color?: string }) {
-  const { C } = useTheme();
-  return (
-    <View style={styles.infoRow}>
-      <View style={[styles.infoIcon, { backgroundColor: (color || C.tint) + "18" }]}>
-        <Ionicons name={icon as any} size={18} color={color || C.tint} />
-      </View>
-      <View style={styles.infoContent}>
-        <Text style={[styles.infoLabel, { color: C.textMuted }]}>{label}</Text>
-        <Text style={[styles.infoValue, { color: C.text }]}>{value}</Text>
-      </View>
-    </View>
-  );
-}
+type Stop = {
+  station: { title: string; short_title: string; popular_title: string; code: string };
+  arrival: string | null;
+  departure: string | null;
+  duration: number | null;
+  stop_time: number | null;
+};
 
 export default function TrainDetailScreen() {
   const { C } = useTheme();
@@ -61,13 +61,26 @@ export default function TrainDetailScreen() {
   const params = useLocalSearchParams();
 
   const segment: TrainSegment | null = params.data ? JSON.parse(params.data as string) : null;
-  const date = params.date as string || new Date().toISOString().split("T")[0];
+  const date = (params.date as string) || new Date().toISOString().split("T")[0];
 
   const { data: ticketsData, save, isSaving } = useTickets();
   const isSaved = ticketsData?.tickets?.some(t => t.segment.uid === segment?.uid) ?? false;
 
+  const [stops, setStops] = useState<Stop[]>([]);
+  const [stopsLoading, setStopsLoading] = useState(false);
+
   const topPad = Platform.OS === "web" ? 67 : insets.top;
-  const bottomPad = (Platform.OS === "web" ? 34 : insets.bottom) + 20;
+  const bottomPad = (Platform.OS === "web" ? 34 : insets.bottom) + 16;
+
+  useEffect(() => {
+    if (!segment?.uid) return;
+    setStopsLoading(true);
+    fetch(`${BASE_URL}/api/schedule/thread?uid=${encodeURIComponent(segment.uid)}&date=${date}`)
+      .then(r => r.ok ? r.json() : { stops: [] })
+      .then(d => setStops(d.stops || []))
+      .catch(() => setStops([]))
+      .finally(() => setStopsLoading(false));
+  }, [segment?.uid, date]);
 
   if (!segment) {
     return (
@@ -86,6 +99,10 @@ export default function TrainDetailScreen() {
     } catch {
       Alert.alert("Ошибка", "Не удалось сохранить рейс");
     }
+  };
+
+  const handleBuy = () => {
+    router.push({ pathname: "/train/buy", params: { uid: segment.uid, data: JSON.stringify(segment), date } });
   };
 
   return (
@@ -107,7 +124,7 @@ export default function TrainDetailScreen() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: bottomPad }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: bottomPad + 80 }}>
         <View style={[styles.routeCard, { backgroundColor: C.surface, borderColor: C.border }]}>
           <View style={styles.routeMain}>
             <View style={styles.stationBlock}>
@@ -154,35 +171,78 @@ export default function TrainDetailScreen() {
           ) : null}
         </View>
 
-        <View style={[styles.infoCard, { backgroundColor: C.surface, borderColor: C.border }]}>
-          <Text style={[styles.infoCardTitle, { color: C.text }]}>Детали рейса</Text>
-          <InfoRow icon="train-outline" label="Номер рейса" value={segment.number} />
-          {segment.transport_subtype && (
-            <InfoRow icon="flash-outline" label="Тип поезда" value={segment.transport_subtype} color={C.orange} />
-          )}
-          {segment.thread_express_type && (
-            <InfoRow icon="speedometer-outline" label="Категория" value={segment.thread_express_type} color={C.orange} />
-          )}
-          <InfoRow icon="time-outline" label="Время в пути" value={formatDuration(segment.duration)} />
-          {segment.stops && (
-            <InfoRow icon="location-outline" label="Остановки" value={segment.stops} />
+        <Text style={[styles.sectionTitle, { color: C.textMuted }]}>Маршрут и остановки</Text>
+
+        <View style={[styles.stopsCard, { backgroundColor: C.surface, borderColor: C.border }]}>
+          {stopsLoading ? (
+            <View style={styles.stopsLoading}>
+              <ActivityIndicator size="small" color={C.tint} />
+              <Text style={[styles.stopsLoadingText, { color: C.textMuted }]}>Загружаем остановки...</Text>
+            </View>
+          ) : stops.length === 0 ? (
+            <View style={styles.stopsLoading}>
+              <Ionicons name="information-circle-outline" size={18} color={C.textMuted} />
+              <Text style={[styles.stopsLoadingText, { color: C.textMuted }]}>Нет данных об остановках</Text>
+            </View>
+          ) : (
+            stops.map((stop, i) => {
+              const isFirst = i === 0;
+              const isLast = i === stops.length - 1;
+              const time = stop.departure ?? stop.arrival;
+              return (
+                <View key={i} style={styles.stopRow}>
+                  <View style={styles.stopTimeline}>
+                    <View style={[
+                      styles.stopDot,
+                      {
+                        backgroundColor: isFirst || isLast ? C.tint : C.surface,
+                        borderColor: isFirst || isLast ? C.tint : C.border,
+                        borderWidth: isFirst || isLast ? 0 : 2,
+                        width: isFirst || isLast ? 12 : 8,
+                        height: isFirst || isLast ? 12 : 8,
+                      },
+                    ]} />
+                    {!isLast && <View style={[styles.stopLine, { backgroundColor: C.border }]} />}
+                  </View>
+                  <View style={[styles.stopContent, !isLast && { paddingBottom: 16 }]}>
+                    <Text style={[styles.stopTime, { color: isFirst || isLast ? C.text : C.textSecondary }]}>
+                      {time ? formatTime(time) : "—"}
+                    </Text>
+                    <View style={styles.stopNameRow}>
+                      <Text
+                        style={[
+                          styles.stopName,
+                          { color: isFirst || isLast ? C.text : C.textSecondary },
+                          (isFirst || isLast) && { fontFamily: "Inter_600SemiBold" },
+                        ]}
+                        numberOfLines={2}
+                      >
+                        {stop.station.title}
+                        {isFirst ? "  ·  Отправление" : isLast ? "  ·  Прибытие" : ""}
+                      </Text>
+                    </View>
+                    {stop.stop_time && stop.stop_time > 0 ? (
+                      <Text style={[styles.stopDwell, { color: C.textMuted }]}>стоянка {stop.stop_time} мин</Text>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            })
           )}
         </View>
+      </ScrollView>
 
+      <View style={[styles.footer, { paddingBottom: bottomPad, backgroundColor: C.surface, borderTopColor: C.border }]}>
         <Pressable
-          style={({ pressed }) => [
-            styles.saveFullBtn,
-            { backgroundColor: isSaved ? C.surfaceSecondary : C.tint, opacity: pressed ? 0.85 : 1 },
-          ]}
-          onPress={handleSave}
-          disabled={isSaved || isSaving}
+          style={({ pressed }) => [styles.buyBtn, { backgroundColor: C.tint, opacity: pressed ? 0.88 : 1 }]}
+          onPress={handleBuy}
         >
-          <Ionicons name={isSaved ? "checkmark-circle" : "bookmark-outline"} size={20} color={isSaved ? C.textMuted : "#fff"} />
-          <Text style={[styles.saveFullText, { color: isSaved ? C.textMuted : "#fff" }]}>
-            {isSaved ? "Уже сохранён" : "Сохранить в Мои билеты"}
+          <Ionicons name="card-outline" size={20} color="#fff" />
+          <Text style={styles.buyBtnText}>
+            {segment.price_min ? `Купить · от ${segment.price_min} ₽` : "Купить билет"}
           </Text>
         </Pressable>
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -200,15 +260,8 @@ const styles = StyleSheet.create({
   backBtn: { padding: 8 },
   saveBtn: { padding: 8 },
   headerCenter: { flex: 1, alignItems: "center" },
-  headerTitle: {
-    fontSize: 17,
-    fontFamily: "Inter_600SemiBold",
-  },
-  headerSub: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    marginTop: 1,
-  },
+  headerTitle: { fontSize: 17, fontFamily: "Inter_600SemiBold" },
+  headerSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 1 },
   routeCard: {
     margin: 16,
     borderRadius: 20,
@@ -222,43 +275,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   stationBlock: { flex: 1, gap: 4 },
-  bigTime: {
-    fontSize: 32,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: -1,
-  },
-  stationName: {
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-    lineHeight: 20,
-  },
-  stationSub: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
-  middleBlock: {
-    width: 90,
-    alignItems: "center",
-    gap: 6,
-  },
-  durLabel: {
-    fontSize: 11,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-  },
-  durationLine: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: "100%",
-    gap: 2,
-  },
+  bigTime: { fontSize: 32, fontFamily: "Inter_700Bold", letterSpacing: -1 },
+  stationName: { fontSize: 14, fontFamily: "Inter_500Medium", lineHeight: 20 },
+  stationSub: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  middleBlock: { width: 90, alignItems: "center", gap: 6 },
+  durLabel: { fontSize: 11, fontFamily: "Inter_400Regular", textAlign: "center" },
+  durationLine: { flexDirection: "row", alignItems: "center", width: "100%", gap: 2 },
   dot: { width: 6, height: 6, borderRadius: 3 },
   line: { flex: 1, height: 1 },
-  dateLabel: {
-    fontSize: 10,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-  },
+  dateLabel: { fontSize: 10, fontFamily: "Inter_400Regular", textAlign: "center" },
   priceBlock: {
     flexDirection: "row",
     alignItems: "center",
@@ -267,66 +292,86 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     gap: 8,
   },
-  priceText: {
-    fontSize: 20,
-    fontFamily: "Inter_700Bold",
+  priceText: { fontSize: 20, fontFamily: "Inter_700Bold" },
+  priceNote: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  sectionTitle: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    marginTop: 4,
   },
-  priceNote: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-  },
-  infoCard: {
+  stopsCard: {
     marginHorizontal: 16,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     padding: 16,
-    gap: 12,
+    paddingBottom: 4,
     marginBottom: 16,
   },
-  infoCardTitle: {
-    fontSize: 17,
-    fontFamily: "Inter_600SemiBold",
-    marginBottom: 4,
-  },
-  infoRow: {
+  stopsLoading: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
+    paddingVertical: 12,
+  },
+  stopsLoadingText: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  stopRow: {
+    flexDirection: "row",
     gap: 12,
+    alignItems: "flex-start",
   },
-  infoIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
+  stopTimeline: {
     alignItems: "center",
-    justifyContent: "center",
+    width: 20,
+    paddingTop: 3,
   },
-  infoContent: { flex: 1, gap: 1 },
-  infoLabel: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
+  stopDot: {
+    borderRadius: 10,
   },
-  infoValue: {
+  stopLine: {
+    width: 2,
+    flex: 1,
+    minHeight: 24,
+    marginTop: 4,
+  },
+  stopContent: {
+    flex: 1,
+    paddingBottom: 4,
+    gap: 1,
+  },
+  stopTime: {
     fontSize: 15,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: -0.3,
   },
-  saveFullBtn: {
-    marginHorizontal: 16,
+  stopNameRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
+  stopName: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 19,
+    flexShrink: 1,
+  },
+  stopDwell: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    marginTop: 1,
+  },
+  footer: {
+    borderTopWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  buyBtn: {
     borderRadius: 16,
     paddingVertical: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    marginBottom: 8,
   },
-  saveFullText: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-  },
-  errorText: {
-    fontSize: 16,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    marginTop: 40,
-  },
+  buyBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold", color: "#fff" },
+  errorText: { fontSize: 16, fontFamily: "Inter_400Regular", textAlign: "center", marginTop: 40 },
 });

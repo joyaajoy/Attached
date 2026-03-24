@@ -77,6 +77,10 @@ export default function ScheduleScreen() {
     }
   }, [saveTicket, selectedDate]);
 
+  const handleBuy = useCallback((seg: TrainSegment) => {
+    router.push({ pathname: "/train/buy", params: { uid: seg.uid, data: JSON.stringify(seg), date: selectedDate } });
+  }, [router, selectedDate]);
+
   const openPicker = (target: PickerTarget) => {
     if (Platform.OS !== "web") Haptics.selectionAsync();
     setPickerTarget(target);
@@ -179,6 +183,7 @@ export default function ScheduleScreen() {
                 isSaved={savedIds.has(item.uid)}
                 onSave={handleSave}
                 onPress={() => router.push({ pathname: "/train/[uid]", params: { uid: item.uid, data: JSON.stringify(item), date: selectedDate } })}
+                onBuy={handleBuy}
               />
             </Animated.View>
           )}

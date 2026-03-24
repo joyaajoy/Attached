@@ -9,6 +9,7 @@ import { useTheme } from "@/hooks/useTheme";
 interface Props {
   segment: TrainSegment;
   onPress?: (segment: TrainSegment) => void;
+  onBuy?: (segment: TrainSegment) => void;
   onSave?: (segment: TrainSegment) => void;
   isSaved?: boolean;
 }
@@ -48,7 +49,7 @@ function getTrainTypeLabel(seg: TrainSegment): { label: string; color: string } 
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-export function TrainCard({ segment, onPress, onSave, isSaved }: Props) {
+export function TrainCard({ segment, onPress, onBuy, onSave, isSaved }: Props) {
   const { C } = useTheme();
   const scale = useSharedValue(1);
   const anim = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
@@ -60,6 +61,11 @@ export function TrainCard({ segment, onPress, onSave, isSaved }: Props) {
     });
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress?.(segment);
+  };
+
+  const handleBuy = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onBuy?.(segment);
   };
 
   const handleSave = () => {
@@ -123,7 +129,7 @@ export function TrainCard({ segment, onPress, onSave, isSaved }: Props) {
         <View style={{ flex: 1 }} />
         <Pressable
           style={[styles.buyBtn, { backgroundColor: C.tint }]}
-          onPress={handlePress}
+          onPress={handleBuy}
           hitSlop={4}
         >
           <Text style={styles.buyBtnText}>Купить</Text>
