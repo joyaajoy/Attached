@@ -6,7 +6,6 @@ import {
   FlatList,
   Pressable,
   ActivityIndicator,
-  Alert,
   Platform,
   Modal,
   ScrollView,
@@ -112,15 +111,27 @@ function SpinningQR({ data, size }: { data: string; size: number }) {
 function ThreeDotsMenu({ onDelete }: { onDelete: () => void }) {
   const { C } = useTheme();
   const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const handleOpen = () => {
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setConfirming(false);
     setOpen(true);
   };
 
-  const handleDelete = () => {
+  const handleClose = () => {
     setOpen(false);
-    setTimeout(() => onDelete(), 150);
+    setConfirming(false);
+  };
+
+  const handleDeletePress = () => {
+    setConfirming(true);
+  };
+
+  const handleConfirm = () => {
+    setOpen(false);
+    setConfirming(false);
+    onDelete();
   };
 
   return (
@@ -131,20 +142,40 @@ function ThreeDotsMenu({ onDelete }: { onDelete: () => void }) {
 
       {open && (
         <>
-          <TouchableWithoutFeedback onPress={() => setOpen(false)}>
+          <TouchableWithoutFeedback onPress={handleClose}>
             <View style={StyleSheet.absoluteFill} />
           </TouchableWithoutFeedback>
           <Animated.View
             entering={FadeIn.duration(120)}
             style={[styles.dropdownMenu, { backgroundColor: C.surface, borderColor: C.border, shadowColor: C.text }]}
           >
-            <Pressable
-              style={({ pressed }) => [styles.dropdownItem, { opacity: pressed ? 0.6 : 1 }]}
-              onPress={handleDelete}
-            >
-              <Ionicons name="trash-outline" size={16} color={C.red} />
-              <Text style={[styles.dropdownItemText, { color: C.red }]}>Удалить билет</Text>
-            </Pressable>
+            {!confirming ? (
+              <Pressable
+                style={({ pressed }) => [styles.dropdownItem, { opacity: pressed ? 0.6 : 1 }]}
+                onPress={handleDeletePress}
+              >
+                <Ionicons name="trash-outline" size={16} color={C.red} />
+                <Text style={[styles.dropdownItemText, { color: C.red }]}>Удалить билет</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.confirmBlock}>
+                <Text style={[styles.confirmText, { color: C.text }]}>Удалить билет?</Text>
+                <View style={styles.confirmBtns}>
+                  <Pressable
+                    style={({ pressed }) => [styles.confirmCancel, { borderColor: C.border, opacity: pressed ? 0.6 : 1 }]}
+                    onPress={handleClose}
+                  >
+                    <Text style={[styles.confirmCancelText, { color: C.textSecondary }]}>Отмена</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [styles.confirmDelete, { backgroundColor: C.red, opacity: pressed ? 0.8 : 1 }]}
+                    onPress={handleConfirm}
+                  >
+                    <Text style={styles.confirmDeleteText}>Удалить</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
           </Animated.View>
         </>
       )}
@@ -168,17 +199,8 @@ function TicketDetailModal({ ticket, onClose, onDelete }: {
   const category = getTrainCategory(seg);
 
   const handleDelete = () => {
-    Alert.alert("Удалить билет?", "Билет будет удалён из Моих билетов.", [
-      { text: "Отмена", style: "cancel" },
-      {
-        text: "Удалить",
-        style: "destructive",
-        onPress: () => {
-          onDelete(ticket.id);
-          onClose();
-        },
-      },
-    ]);
+    onDelete(ticket.id);
+    onClose();
   };
 
   return (
@@ -511,6 +533,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 14,
   },
   dropdownItemText: { fontSize: 15, fontFamily: "Inter_500Medium" },
+  confirmBlock: { padding: 14, gap: 12 },
+  confirmText: { fontSize: 14, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  confirmBtns: { flexDirection: "row", gap: 8 },
+  confirmCancel: {
+    flex: 1, paddingVertical: 9, borderRadius: 10, borderWidth: 1,
+    alignItems: "center",
+  },
+  confirmCancelText: { fontSize: 14, fontFamily: "Inter_500Medium" },
+  confirmDelete: {
+    flex: 1, paddingVertical: 9, borderRadius: 10,
+    alignItems: "center",
+  },
+  confirmDeleteText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: "#fff" },
   detailCard: {
     marginHorizontal: 16, borderRadius: 20, borderWidth: 1.5,
     flexDirection: "row", overflow: "hidden",

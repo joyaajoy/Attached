@@ -1,5 +1,5 @@
-import React, { useRef } from "react";
-import { ScrollView, Pressable, Text, StyleSheet, View } from "react-native";
+import React from "react";
+import { ScrollView, Pressable, Text, StyleSheet } from "react-native";
 import { useTheme } from "@/hooks/useTheme";
 
 interface Props {
@@ -7,18 +7,31 @@ interface Props {
   onSelect: (date: string) => void;
 }
 
-function getDates(): { date: string; label: string; dayLabel: string }[] {
+function getDates(): { date: string; top: string; bottom: string }[] {
   const days = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
-  const months = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
   const result = [];
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
   for (let i = 0; i < 14; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
     const dateStr = d.toISOString().split("T")[0];
-    const dayLabel = i === 0 ? "Сегодня" : i === 1 ? "Завтра" : days[d.getDay()];
-    const label = `${d.getDate()} ${months[d.getMonth()]}`;
-    result.push({ date: dateStr, label, dayLabel });
+    const dd = d.getDate().toString();
+    const mm = (d.getMonth() + 1).toString().padStart(2, "0");
+    const numDate = `${dd}.${mm}`;
+    let top: string;
+    let bottom: string;
+    if (i === 0) {
+      top = "Сегодня";
+      bottom = numDate;
+    } else if (i === 1) {
+      top = "Завтра";
+      bottom = numDate;
+    } else {
+      top = days[d.getDay()];
+      bottom = numDate;
+    }
+    result.push({ date: dateStr, top, bottom });
   }
   return result;
 }
@@ -44,11 +57,11 @@ export function DateSelector({ selectedDate, onSelect }: Props) {
             ]}
             onPress={() => onSelect(d.date)}
           >
-            <Text style={[styles.dayLabel, { color: selected ? "#fff" : C.textMuted }]}>
-              {d.dayLabel}
+            <Text style={[styles.topLabel, { color: selected ? "#fff" : C.textMuted }]}>
+              {d.top}
             </Text>
-            <Text style={[styles.dateLabel, { color: selected ? "#fff" : C.text }]}>
-              {d.label}
+            <Text style={[styles.bottomLabel, { color: selected ? "#fff" : C.text }]}>
+              {d.bottom}
             </Text>
           </Pressable>
         );
@@ -64,21 +77,21 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   item: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1.5,
     alignItems: "center",
-    minWidth: 68,
+    minWidth: 64,
   },
-  dayLabel: {
+  topLabel: {
     fontSize: 11,
     fontFamily: "Inter_500Medium",
     letterSpacing: 0.2,
   },
-  dateLabel: {
+  bottomLabel: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    marginTop: 1,
+    marginTop: 2,
   },
 });
