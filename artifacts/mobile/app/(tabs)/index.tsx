@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Platform,
   Modal,
   RefreshControl,
+  ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,6 +20,7 @@ import { useRouter } from "expo-router";
 import { useTheme } from "@/hooks/useTheme";
 import { useScheduleQuery } from "@/hooks/useSchedule";
 import { useTickets } from "@/hooks/useTickets";
+import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { TrainCard } from "@/components/TrainCard";
 import { DateSelector } from "@/components/DateSelector";
 import { StationPicker } from "@/components/StationPicker";
@@ -28,10 +30,18 @@ function todayStr(): string {
   return new Date().toISOString().split("T")[0];
 }
 
+function formatDate(dateStr: string): string {
+  try {
+    return new Date(dateStr).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  } catch {
+    return dateStr;
+  }
+}
+
 type PickerTarget = "from" | "to" | null;
 
 export default function ScheduleScreen() {
-  const { C, isDark } = useTheme();
+  const { C } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
@@ -40,9 +50,12 @@ export default function ScheduleScreen() {
   const [selectedDate, setSelectedDate] = useState(todayStr());
   const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
 
+  const { history, addSearch, clearHistory } = useSearchHistory();
   const { data: tickets } = useTickets();
   const savedIds = useMemo(() => new Set((tickets?.tickets ?? []).map(t => t.segment.uid)), [tickets]);
   const { save: saveTicket } = useTickets();
+
+  const isSearching = !!(fromStation && toStation);
 
   const {
     data: schedule,
@@ -55,6 +68,12 @@ export default function ScheduleScreen() {
     toStation?.code ?? "",
     selectedDate
   );
+
+  useEffect(() => {
+    if (fromStation && toStation && schedule && !isLoading) {
+      addSearch(fromStation, toStation, selectedDate);
+    }
+  }, [schedule, isLoading]);
 
   const allSegments = useMemo(() => {
     const s = schedule?.segments ?? [];
@@ -69,10 +88,17 @@ export default function ScheduleScreen() {
     setToStation(tmp);
   };
 
+  const handleReset = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setFromStation(null);
+    setToStation(null);
+    setSelectedDate(todayStr());
+  };
+
   const handleSave = useCallback(async (seg: TrainSegment) => {
     try {
       await saveTicket(seg, selectedDate);
-    } catch (e) {
+    } catch {
       // ignore
     }
   }, [saveTicket, selectedDate]);
@@ -86,13 +112,27 @@ export default function ScheduleScreen() {
     setPickerTarget(target);
   };
 
+  const applyHistory = (entry: { from: Station; to: Station; date: string }) => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setFromStation(entry.from);
+    setToStation(entry.to);
+    setSelectedDate(entry.date);
+  };
+
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
   return (
     <View style={[styles.container, { backgroundColor: C.background }]}>
       <View style={[styles.header, { paddingTop: topPad, backgroundColor: C.surface, borderBottomColor: C.border }]}>
-        <Text style={[styles.headerTitle, { color: C.text }]}>Расписание</Text>
-        <Text style={[styles.headerSub, { color: C.textMuted }]}>Электрички России</Text>
+        <View style={styles.titleRow}>
+          <Text style={[styles.headerTitle, { color: C.text }]}>Расписание</Text>
+          {isSearching && (
+            <Pressable style={styles.resetBtn} onPress={handleReset} hitSlop={8}>
+              <Ionicons name="close-circle" size={20} color={C.textMuted} />
+              <Text style={[styles.resetText, { color: C.textMuted }]}>Сбросить</Text>
+            </Pressable>
+          )}
+        </View>
 
         <View style={[styles.searchCard, { backgroundColor: C.surfaceSecondary, borderColor: C.border }]}>
           <Pressable
@@ -138,17 +178,63 @@ export default function ScheduleScreen() {
           </Pressable>
         </View>
 
-        <DateSelector selectedDate={selectedDate} onSelect={setSelectedDate} />
+        {isSearching && <DateSelector selectedDate={selectedDate} onSelect={setSelectedDate} />}
       </View>
 
-      {!fromStation || !toStation ? (
-        <Animated.View entering={FadeIn} style={styles.emptyContainer}>
-          <Ionicons name="train-outline" size={64} color={C.border} />
-          <Text style={[styles.emptyTitle, { color: C.text }]}>Куда едем?</Text>
-          <Text style={[styles.emptyText, { color: C.textMuted }]}>
-            Выберите станции отправления и прибытия
-          </Text>
-        </Animated.View>
+      {!isSearching ? (
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: (Platform.OS === "web" ? 34 : insets.bottom) + 90 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {history.length === 0 ? (
+            <Animated.View entering={FadeIn} style={styles.emptyContainer}>
+              <Ionicons name="train-outline" size={64} color={C.border} />
+              <Text style={[styles.emptyTitle, { color: C.text }]}>Куда едем?</Text>
+              <Text style={[styles.emptyText, { color: C.textMuted }]}>
+                Выберите станции отправления и прибытия
+              </Text>
+            </Animated.View>
+          ) : (
+            <Animated.View entering={FadeIn}>
+              <View style={styles.historyHeader}>
+                <Text style={[styles.historyTitle, { color: C.textMuted }]}>История поиска</Text>
+                <Pressable onPress={clearHistory} hitSlop={8}>
+                  <Text style={[styles.historyClear, { color: C.tint }]}>Очистить</Text>
+                </Pressable>
+              </View>
+              {history.map((entry, i) => (
+                <Pressable
+                  key={i}
+                  style={({ pressed }) => [
+                    styles.historyItem,
+                    { backgroundColor: C.surface, borderColor: C.border, opacity: pressed ? 0.75 : 1 },
+                  ]}
+                  onPress={() => applyHistory(entry)}
+                >
+                  <View style={styles.historyLeft}>
+                    <View style={styles.historyRoute}>
+                      <View style={[styles.historyDot, { backgroundColor: C.green }]} />
+                      <Text style={[styles.historyStation, { color: C.text }]} numberOfLines={1}>
+                        {entry.from.short_title || entry.from.title}
+                      </Text>
+                    </View>
+                    <View style={[styles.historyConnector, { backgroundColor: C.border }]} />
+                    <View style={styles.historyRoute}>
+                      <View style={[styles.historyDot, { backgroundColor: C.tint }]} />
+                      <Text style={[styles.historyStation, { color: C.text }]} numberOfLines={1}>
+                        {entry.to.short_title || entry.to.title}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.historyRight}>
+                    <Text style={[styles.historyDate, { color: C.textMuted }]}>{formatDate(entry.date)}</Text>
+                    <Ionicons name="chevron-forward" size={14} color={C.textMuted} />
+                  </View>
+                </Pressable>
+              ))}
+            </Animated.View>
+          )}
+        </ScrollView>
       ) : isLoading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={C.tint} />
@@ -212,21 +298,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     paddingBottom: 0,
   },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 2,
+  },
   headerTitle: {
     fontSize: 28,
     fontFamily: "Inter_700Bold",
-    paddingHorizontal: 16,
-    marginTop: 8,
   },
-  headerSub: {
+  resetBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 4,
+  },
+  resetText: {
     fontSize: 14,
     fontFamily: "Inter_400Regular",
-    paddingHorizontal: 16,
-    marginBottom: 14,
-    marginTop: 2,
   },
   searchCard: {
     marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 10,
     borderRadius: 16,
     borderWidth: 1,
     overflow: "hidden",
@@ -246,18 +343,9 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   stationInfo: { flex: 1, gap: 1 },
-  stationName: {
-    fontSize: 16,
-    fontFamily: "Inter_500Medium",
-  },
-  stationSub: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
-  stationPlaceholder: {
-    fontSize: 16,
-    fontFamily: "Inter_400Regular",
-  },
+  stationName: { fontSize: 16, fontFamily: "Inter_500Medium" },
+  stationSub: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  stationPlaceholder: { fontSize: 16, fontFamily: "Inter_400Regular" },
   swapBtn: {
     position: "absolute",
     right: 14,
@@ -272,42 +360,50 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   emptyContainer: {
-    flex: 1,
+    paddingTop: 80,
     alignItems: "center",
-    justifyContent: "center",
     gap: 12,
     paddingHorizontal: 32,
   },
-  emptyTitle: {
-    fontSize: 20,
-    fontFamily: "Inter_600SemiBold",
-    textAlign: "center",
-  },
-  emptyText: {
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  center: {
-    flex: 1,
+  emptyTitle: { fontSize: 20, fontFamily: "Inter_600SemiBold", textAlign: "center" },
+  emptyText: { fontSize: 15, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 22 },
+  historyHeader: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
-  loadingText: {
-    fontSize: 15,
+  historyTitle: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  historyClear: {
+    fontSize: 13,
     fontFamily: "Inter_400Regular",
   },
-  retryBtn: {
-    paddingHorizontal: 24,
+  historyItem: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 12,
-    marginTop: 8,
   },
-  retryText: {
-    color: "#fff",
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 15,
-  },
+  historyLeft: { flex: 1, gap: 4 },
+  historyRoute: { flexDirection: "row", alignItems: "center", gap: 8 },
+  historyDot: { width: 8, height: 8, borderRadius: 4 },
+  historyConnector: { width: 1, height: 8, marginLeft: 3.5 },
+  historyStation: { fontSize: 15, fontFamily: "Inter_500Medium", flex: 1 },
+  historyRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  historyDate: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
+  loadingText: { fontSize: 15, fontFamily: "Inter_400Regular" },
+  retryBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, marginTop: 8 },
+  retryText: { color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 15 },
 });
